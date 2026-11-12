@@ -1,0 +1,238 @@
+-- ====================================================================================================
+-- [통합 MIG] AS-IS 원천 DB -> MIG1_USER 중간 매핑 테이블 INSERT 스크립트
+-- 대상 DBMS : Tibero 7
+-- 목적 : 원천 조직도 테이블(IAM_USER, APP_USER 등)에서 MIG1_USER의 중간 매핑 테이블로
+--        조직도 6종 데이터를 추출/적재(INSERT)합니다.
+-- ====================================================================================================
+
+-- 1. 직위 정보 적재 (MIG1_USER.MG_POS)
+TRUNCATE TABLE MIG1_USER.MG_POS;
+
+INSERT INTO MIG1_USER.MG_POS (
+    POSCODE,
+    POSNAME,
+    POSLEVEL,
+    POSSEQ
+)
+SELECT 
+    POSITION_ID    AS POSCODE,
+    POSITION_NAME  AS POSNAME,
+    POSITION_ORDER AS POSLEVEL,
+    ROW_NUMBER() OVER (PARTITION BY POSITION_ORDER ORDER BY POSITION_ID) AS POSSEQ
+FROM IAM_USER.TCN_POSITIONINFORMATION
+WHERE POSITION_ID IS NOT NULL;
+
+COMMIT;
+
+
+-- 2. 직급 정보 적재 (MIG1_USER.MG_RANK)
+TRUNCATE TABLE MIG1_USER.MG_RANK;
+
+INSERT INTO MIG1_USER.MG_RANK (
+    RANKCODE,
+    RANKNAME,
+    RANKLEVEL,
+    RANKDEL
+)
+SELECT 
+    GRADE_ID    AS RANKCODE,
+    GRADE_NAME  AS RANKNAME,
+    GRADE_ORDER AS RANKLEVEL,
+    ROW_NUMBER() OVER (PARTITION BY GRADE_ORDER ORDER BY GRADE_ID) AS RANKDEL
+FROM IAM_USER.TCN_GRADEINFORMATION
+WHERE GRADE_ID IS NOT NULL;
+
+COMMIT;
+
+
+-- 3. 부서 정보 적재 (MIG1_USER.MG_DEPT)
+TRUNCATE TABLE MIG1_USER.MG_DEPT;
+
+INSERT INTO MIG1_USER.MG_DEPT (
+    DEPTNAME,
+    DEPTCODE,
+    PARCODE,
+    SEQ,
+    ABBREVIATION,
+    ISUSE,
+    RCVF,
+    MODIFYDATE,
+    DEPTNAME2
+)
+SELECT 
+    ORG_NAME                                  AS DEPTNAME,
+    ORG_ID                                    AS DEPTCODE,
+    NVL(ORG_PARENT_ID, '000000000')           AS PARCODE,
+    NVL(ORG_ORDER, 1)                         AS SEQ,
+    ORG_ABBR_NAME                             AS ABBREVIATION,
+    DECODE(IS_DELETED, 0, '1', '0')           AS ISUSE,         -- 0: 정상(1), 1: 삭제(0)
+    DECODE(IS_PROCESS, 1, '1', '0')           AS RCVF,          -- 처리과 여부
+    SYSDATE                                   AS MODIFYDATE,
+    ORG_OTHER_NAME                            AS DEPTNAME2
+FROM IAM_USER.TCN_ORGANIZATIONINFORMATION
+WHERE ORG_ID IS NOT NULL;
+
+COMMIT;
+
+
+-- 4. 사용자 정보 적재 (MIG1_USER.MG_USER)
+-- 세원에서 작업으로 우린 신경 쓰지 않는다.
+TRUNCATE TABLE MIG1_USER.MG_USER;
+
+INSERT INTO MIG1_USER.MG_USER (
+    NAME,
+    EMPCODE,
+    DEPTCODE,
+    POSNAME,
+    RANKNAME,
+    DUTYNAME,
+    PASSWORD,
+    SECURITY,
+    SANCLEVEL,
+    ISUSE,
+    MODIFYDATE,
+    SEX,
+    PHONE,
+    FAX,
+    EMAIL,
+    MOBILEPHONE,
+    BUSINESS,
+    USER_ID,
+    USER_UID
+)
+SELECT 
+    U.USER_NAME                               AS NAME,
+    NVL(U.EMPLOYEE_ID, U.USER_ID)             AS EMPCODE,
+    U.DEPT_ID                                 AS DEPTCODE,
+    NVL(P.POSITION_NAME, '미지정')             AS POSNAME,
+    NVL(G.GRADE_NAME, '')                     AS RANKNAME,
+    NVL(T.TITLE_NAME, '')                     AS DUTYNAME,
+    U.USER_PASSWORD                           AS PASSWORD,
+    100                                       AS SECURITY,
+    100                                       AS SANCLEVEL,
+    CASE 
+        WHEN U.IS_DELETED = 0 THEN '1'        -- 0: 재직(1)
+        ELSE '0'                              -- 1: 휴직/퇴직(0)
+    END                                       AS ISUSE,
+    SYSDATE                                   AS MODIFYDATE,
+    DECODE(U.SEX, 'M', '0', 'F', '1', '0')    AS SEX,
+    U.OFFICE_TEL                              AS PHONE,
+    U.OFFICE_FAX                              AS FAX,
+    U.EMAIL                                   AS EMAIL,
+    U.MOBILE_TEL                              AS MOBILEPHONE,
+    U.CHARGED_WORK                            AS BUSINESS,
+    U.USER_ID                                 AS USER_ID,
+    U.USER_UID                                AS USER_UID
+FROM IAM_USER.TCN_USERINFORMATION_BASIC U
+LEFT JOIN IAM_USER.TCN_POSITIONINFORMATION P ON U.POSITION_CODE = P.POSITION_ID
+LEFT JOIN IAM_USER.TCN_GRADEINFORMATION G    ON U.GRADE_CODE = G.GRADE_ID
+LEFT JOIN IAM_USER.TCN_TITLEINFORMATION T    ON U.TITLE_CODE = T.TITLE_ID;
+
+COMMIT;
+
+
+-- 5. 그룹 정보 적재 (MIG1_USER.MG_GROUP)
+TRUNCATE TABLE MIG1_USER.MG_GROUP;
+
+INSERT INTO MIG1_USER.MG_GROUP (
+    HANDY_ID,
+    COMP_ID,
+    GROUP_ID,
+    USER_CODE,
+    USER_NAME,
+    APPLICATION,
+    GROUP_NAME,
+    GROUP_DESC
+)
+SELECT
+    '' AS HANDY_ID,
+    COMP_ID,
+    RECV_GROUP_ID AS GROUP_ID,
+    REGISTER_ID AS USER_CODE,
+    REGISTER_NAME AS USER_NAME,
+    'R' AS APPLICATION,                               -- R: 수신처그룹
+    REPLACE(REPLACE(RECV_GROUP_NAME, CHR(13), ''), CHR(10), '') AS GROUP_NAME,
+    '' AS GROUP_DESC
+FROM APP_USER.TGW_RECV_GROUP
+UNION ALL
+SELECT
+    '' AS HANDY_ID,
+    COMP_ID,
+    PUBVIEW_GROUP_ID AS GROUP_ID,
+    REGISTER_ID AS USER_CODE,
+    REGISTER_NAME AS USER_NAME,
+    'G' AS APPLICATION,                               -- G: 공람그룹
+    REPLACE(REPLACE(PUBVIEW_GROUP_NAME, CHR(13), ''), CHR(10), '') AS GROUP_NAME,
+    '' AS GROUP_DESC
+FROM APP_USER.TGW_PUBVIEW_GROUP;
+
+COMMIT;
+
+
+-- 6. 그룹 멤버 정보 적재 (MIG1_USER.MG_GROUP_MEMBER)
+TRUNCATE TABLE MIG1_USER.MG_GROUP_MEMBER;
+
+INSERT INTO MIG1_USER.MG_GROUP_MEMBER (
+    HANDY_ID,
+    GROUP_ID,
+    MEMBER_SEQ,
+    MEMBER_CODE,
+    MEMBER_NAME,
+    MEMBER_TYPE,
+    RECV_DEPT_ID,
+    RECV_DEPT_NAME
+)
+SELECT 
+    '' AS HANDY_ID,
+    RGU.RECV_GROUP_ID AS GROUP_ID,
+    RGU.RECEIVER_ORDER AS MEMBER_SEQ,
+    DECODE(RGU.RECEIVER_TYPE, 'DRU001', RGU.RECV_DEPT_ID, 'DRU002', RGU.RECV_USER_ID) AS MEMBER_CODE,
+    '' AS MEMBER_NAME,
+    DECODE(RGU.RECEIVER_TYPE, 'DRU001', '1', 'DRU002', '0') AS MEMBER_TYPE,
+    RGU.RECV_DEPT_ID,
+    '' AS RECV_DEPT_NAME
+FROM APP_USER.TGW_RECV_GROUP_USER RGU
+UNION ALL
+SELECT 
+    '' AS HANDY_ID,
+    PGU.PUBVIEW_GROUP_ID AS GROUP_ID,
+    PGU.PUB_READER_ORDER AS MEMBER_SEQ,
+    DECODE(PG.GROUP_TYPE, 'GUT001', '000000001', 'GUT002', PGU.PUB_READER_DEPT_ID, PGU.PUB_READER_ID) AS MEMBER_CODE,
+    '' AS MEMBER_NAME,
+    DECODE(PG.GROUP_TYPE, 'GUT001', '5', 'GUT002', '1', 'GUT003', '0') AS MEMBER_TYPE,
+    PGU.PUB_READER_DEPT_ID AS RECV_DEPT_ID,
+    '' AS RECV_DEPT_NAME
+FROM APP_USER.TGW_PUBVIEW_GROUP_USER PGU
+JOIN APP_USER.TGW_PUBVIEW_GROUP PG ON PGU.PUBVIEW_GROUP_ID = PG.PUBVIEW_GROUP_ID;
+
+COMMIT;
+
+-- 7. 권한 정보 적재 (MIG1_USER.MG_AUTH)
+TRUNCATE TABLE MIG1_USER.MG_AUTH;
+
+INSERT INTO MIG1_USER.MG_AUTH (
+    AUTHCODE,
+    EMPCODE,
+    EMPCODE2,
+    DEPTCODE
+)
+SELECT DISTINCT
+    CASE b.ROLE_ID
+        WHEN '1009' THEN 'D1'  -- 전자결재 관리자
+        WHEN '2001' THEN 'D1'  -- 접수담당자 (기관문서관리책임자)
+        WHEN '2002' THEN 'D4'  -- 문서관리자 (부서문서관리책임자)
+        WHEN '2004' THEN 'Da'  -- 발송담당자 (부서날인관리자)
+        WHEN '8002' THEN 'D5'  -- 열람제외문서함 관리자
+        WHEN '7105' THEN 'S1'  -- 부서장
+        ELSE b.ROLE_ID
+    END AS AUTHCODE,
+    NVL(a.EMPLOYEE_ID, a.USER_ID) AS EMPCODE,
+    a.USER_UID AS EMPCODE2,
+    a.DEPT_ID AS DEPTCODE
+FROM IAM_USER.TCN_USERINFORMATION_BASIC a
+JOIN IAM_USER.TCN_ROLEINFORMATION b
+  ON a.ROLE_CODE LIKE '%' || b.ROLE_ID || '^%'
+WHERE a.IS_DELETED = 0
+  AND b.ROLE_ID IN ('2001', '2002', '2004', '8002', '7105', '1009');
+
+COMMIT;

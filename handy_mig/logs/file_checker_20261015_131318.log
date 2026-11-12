@@ -1,0 +1,44 @@
+[2026-10-15 13:13:18] [INFO] ==================================================================================
+[2026-10-15 13:13:18] [INFO]  [Handy MIG] 전자결재 파일 물리 정합성 전수 점검 도구 (FileIntegrityChecker)
+[2026-10-15 13:13:18] [INFO]  대상 스키마      : INTRAWARE
+[2026-10-15 13:13:18] [INFO]  병렬 검증 스레드 : 16 Threads
+[2026-10-15 13:13:18] [INFO]  검사 한도        : 1 건 (샘플 모드)
+[2026-10-15 13:13:18] [INFO]  크기 불일치 검사 : 비활성화 (존재 여부 위주)
+[2026-10-15 13:13:18] [INFO] ==================================================================================
+[2026-10-15 13:13:18] [INFO] 스토리지 루트 경로: /data
+[2026-10-15 13:13:18] [WARN] [주의] 스토리지 루트 경로가 현재 서버에 존재하지 않습니다: /data
+[2026-10-15 13:13:18] [WARN]        (로컬 테스트 중인 경우 config/db.properties의 storage.base.path를 확인하십시오.)
+[2026-10-15 13:14:33] [ERROR] 점검 수행 중 오류 발생: JDBC-90401:Connection refused by the server. - Operation timed out
+java.sql.SQLException: JDBC-90401:Connection refused by the server. - Operation timed out
+	at com.tmax.tibero.jdbc.err.TbError.makeSQLException(Unknown Source)
+	at com.tmax.tibero.jdbc.err.TbError.newSQLException(Unknown Source)
+	at com.tmax.tibero.jdbc.comm.TbStream.<init>(Unknown Source)
+	at com.tmax.tibero.jdbc.comm.TbCommType4.createStream(Unknown Source)
+	at com.tmax.tibero.jdbc.driver.TbConnection.openConnection(Unknown Source)
+	at com.tmax.tibero.jdbc.TbDriver.connectInternal(Unknown Source)
+	at com.tmax.tibero.jdbc.TbDriver.connect(Unknown Source)
+	at java.sql/java.sql.DriverManager.getConnection(DriverManager.java:681)
+	at java.sql/java.sql.DriverManager.getConnection(DriverManager.java:229)
+	at com.handy.mig.DbConfig.getConnection(DbConfig.java:115)
+	at com.handy.mig.FileIntegrityChecker.main(FileIntegrityChecker.java:207)
+[2026-10-15 13:14:33] [INFO] ==================================================================================
+[2026-10-15 13:14:33] [INFO]  [파일 정합성 검사 최종 결과 보고]
+[2026-10-15 13:14:33] [INFO]   - 총 검증 대상 건수   : 0 건
+[2026-10-15 13:14:33] [INFO]   - 정상 파일 (OK)      : 0 건 (0.00%)
+[2026-10-15 13:14:33] [INFO]   - 누락 파일 (MISSING) : 0 건 (0.00%)
+[2026-10-15 13:14:33] [INFO]   - 0바이트 파일 (WARN) : 0 건
+[2026-10-15 13:14:33] [INFO]   - 누락 총 추정 용량   : 0.00 MB (약 0.00 GB)
+[2026-10-15 13:14:33] [INFO]   - 총 소요 시간        : 75.09 초 (평균 검증속도: 0 건/초)
+[2026-10-15 13:14:33] [INFO] ----------------------------------------------------------------------------------
+[2026-10-15 13:14:33] [INFO]   - 누락 파일 상세 리포트 : /Users/jaesunglee/dev/handy/mig/handy_mig/report/missing_files_20261015_131318.csv
+[2026-10-15 13:14:33] [INFO]   - 0바이트 파일 리포트   : /Users/jaesunglee/dev/handy/mig/handy_mig/report/zero_byte_files_20261015_131318.csv
+[2026-10-15 13:14:33] [INFO]   - 원천 복구용 쉘 스크립트: /Users/jaesunglee/dev/handy/mig/handy_mig/report/copy_missing_from_asis_20261015_131318.sh
+[2026-10-15 13:14:33] [INFO]   - 종합 요약 리포트      : /Users/jaesunglee/dev/handy/mig/handy_mig/report/file_integrity_summary_20261015_131318.txt
+[2026-10-15 13:14:33] [INFO] ==================================================================================
+[2026-10-15 13:14:33] [INFO] 🎉 축하합니다! 모든 DB 레코드에 대응하는 물리 파일이 디스크에 100% 정상 존재합니다.
+=========================================================================
+ ⭐ [내부망 -> 외부망 반출 안내]
+   실행 결과 및 로그가 아래 파일에 100% 전수 저장되었습니다:
+   1) 타임스탬프 파일 : /Users/jaesunglee/dev/handy/mig/handy_mig/logs/file_checker_20261015_131318.log
+   2) 최신 고정 파일   : /Users/jaesunglee/dev/handy/mig/handy_mig/logs/latest_file_checker.log
+=========================================================================

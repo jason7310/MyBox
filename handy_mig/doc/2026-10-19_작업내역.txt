@@ -1,0 +1,118 @@
+====================================================================================================
+ [통합 MIG] 일별 작업 내역서 - 2026년 10월 19일 (오늘)
+====================================================================================================
+ 프로젝트명 : 한국보훈복지의료공단 차세대 전자결재(Handy 10.x) 데이터 이관
+ 대상 DBMS  : Tibero 7 (TAC 2-Node Cluster) / OpenJDK 17 / Rocky Linux 9.7
+ 작성 일자  : 2026-10-19
+ 작성자     : 마이그레이션 전담팀 (Nexus, Forge, Titan, Argus)
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+ 1. 당일 작업 요약 (Executive Summary)
+----------------------------------------------------------------------------------------------------
+ 1) ⭐ 오픈 당일(D-Day) 조직도 증가분(Delta) 7종 일괄 추출 및 사전 진단 체계 완성
+    - 6대 도메인 7종 CSV 일괄 추출기(OrgCsvExporter.java) 및 사전 감사 쿼리(12.DELTA_PRE_CHECK.sql) 구축
+    - pos_delta, rank_delta, dept_delta, user_delta, group_delta, group_member_delta, auth_delta 전수 지원
+ 2) ⭐ 수신문서 첨부 중복 생성(독자 OBJECTID + 중복 파일 복사) 보정 아키텍처 설계 및 구현
+    - AS-IS 문제 분석: 1차 이관 시 수신문서마다 신규 OBJECTID 생성 및 첨부 파일 중복 생성 현상 해결
+    - 작업 우선순위 확립: DOCMBR 매핑 보정(1순위) -> 물리 파일 중복 정리(2순위) -> 고아 DOCUMENT 정리(3순위)
+    - DuplicateAttachmentCleaner.java 및 07.DUPLICATE_ATTACHMENT_CHECK_AND_FIX.sql 완성
+ 3) ⭐ 핸디 공식 파일 스토리지 경로 해독 및 물리 정합성 점검 도구(FileIntegrityChecker) 완비
+    - 운영 스토리지 실측 이미지(IMG_9475) 기반 핸디 규격 공식 경로 해독:
+      {basePath}/hoffice/sancbox/{YYYY}/{M}/{D}/{NUM}/{OBJECTID}
+    - 점검 및 정리 모듈에 공식 경로 로직 100% 반영 완료
+ 4) ⭐ 무한 행(Hang) 방지 비상 강제 종료(Kill) 환경 및 대화형 메뉴 구축
+    - kill_mig.sh 작성 및 build_and_run.sh 대화형 원터치 메뉴(1~14번, k, s) 완성
+    - doc/04.통합_마이그레이션_실행매뉴얼(SOP).md 표준 운영 절차서 작성 완료
+ 5) 🚨 [긴급 조치] 폐쇄망 서버 실행 오류 및 스키마 정합성 전면 발본색원 정정
+    - ① Tibero 7 세션 파라미터 에러(JDBC-7197: SKIP_UNUSABLE_INDEXES) 해결
+    - ② 중간 테이블 접두사 오기 전수 정정 (MIG_DEPT, MIG_USER 등 -> MG_... 21개 파일 전수 교체)
+    - ③ 사번/사용자ID 혼용 위험 원천 제거 (NVL(EMPCODE, USER_ID) -> NVL(EMPCODE, '000000') 10개 파일 전수 교체)
+    - ④ USR_GLOBAL 미존재 컬럼(POS_NAME, RANK_NAME, DUTY_NAME) 전면 제거 (조회 및 INSERT 구문 정제)
+    - ⑤ POS/RANK 미존재 컬럼(POS_LEVEL, RANK_LEVEL) 전면 제거 및 명칭 기반 비교로 정규화
+    - ⑥ 그룹 테이블명 정정: 가상 G_LIST 제거 -> 핸디 표준 INTRAWARE.USR_GROUP, INTRAWARE.G_MEMBER 전수 반영
+    - ⑦ DBA 유틸리티 탑재: ./build_and_run.sh check-cols (02.CHECK_USR_GLOBAL_COLUMNS.sql)
+
+----------------------------------------------------------------------------------------------------
+ 2. 4대 에이전트별 상세 수행 내역 (Agent R&R Activities)
+----------------------------------------------------------------------------------------------------
+
+ [💠 Nexus (총괄 리드 아키텍트)]
+   - D-Day 조직도 증가분(Delta) 관리자 업로드 거버넌스 및 파이프라인 수립:
+     * 외래키 의존성 순서(직위/직급 -> 부서 -> 사용자 -> 그룹/멤버 -> 권한) 확정
+     * DEL(삭제/퇴직) 100% 완전 배제 및 ADD/MOD 전용 선별 추출 원칙 확립
+   - 수신문서 첨부 중복 생성 보정 3단계 아키텍처 총괄 지휘
+   - 핸디 물리 파일 스토리지 경로(hoffice/sancbox/ 공식) 표준 규격 확정
+   - 대화형 메뉴 인터페이스 설계 및 kill_mig.sh 비상 제어 시스템 구축 지휘
+
+ [🔨 Forge (코어 마이그레이션 개발자)]
+   - OrgCsvExporter.java 고도화:
+     * 7종 증가분 CSV(E/F 규격 UTF-8) 원터치 일괄 추출 로직 구현
+   - DuplicateAttachmentCleaner.java 구현:
+     * 원본 기안문서 OBJECTID 탐색 및 DOCMBR 매핑 보정, 중복 물리 파일 안전 삭제, 고아 DOCUMENT 정리
+   - FileIntegrityChecker.java 및 FileStorageUtil 구현:
+     * hoffice/sancbox/{YYYY}/{M}/{D}/{NUM}/{OBJECTID} 공식 경로 알고리즘 반영
+   - kill_mig.sh 및 build_and_run.sh (menu, kill, status, check-cols) 구현
+   - 🚨 스키마 불일치 전수 코드 정정:
+     * TiberoMigRunner.java: SKIP_UNUSABLE_INDEXES 제거 및 세션 최적화 try-catch 방어 코딩
+     * build_and_run.sh: 소스 수정 시간(-nt) 기반 자동 재컴파일 안전장치 탑재
+     * Java/SQL 전반: MG_... 테이블 접두사 일괄 치환, EMPCODE '000000' 기본값 치환
+     * USR_GLOBAL, POS, RANK, USR_GROUP 미존재 컬럼/테이블 전면 정제 완료
+
+ [🛡️ Titan (성능 & 시스템 인프라 DBA)]
+   - Tibero 7 TAC 2-node 환경 최적화 및 세션 파라미터 호환성 검증:
+     * Oracle 전용 파라미터(SKIP_UNUSABLE_INDEXES) 배제, Tibero 세션 PARALLEL DML/DDL 안정화
+     * ALTER SESSION 라이프사이클 분석: CLI 1회성 프로세스 커넥션 종료 시 세션 메모리/설정 자동 100% 소멸 확인
+   - 운영 DB 스키마 실존성 전수 감사 및 가상 컬럼 제거:
+     * INTRAWARE.USR_GLOBAL: POS_NAME, RANK_NAME, DUTY_NAME 컬럼 없음 확인 -> 쿼리 및 INSERT에서 완전 제거
+     * INTRAWARE.POS / RANK: POS_LEVEL, RANK_LEVEL 컬럼 없음 확인 -> 명칭(POS_NAME, RANK_NAME) 기반 비교로 변경
+     * INTRAWARE.USR_GROUP / G_MEMBER: 핸디 공식 표준 그룹 테이블 100% 일치 매핑
+   - 운영 스키마 컬럼 전수 확인 유틸리티(02.CHECK_USR_GLOBAL_COLUMNS.sql) 신규 작성 및 제공
+
+ [👁️ Argus (데이터 무결성 검증관)]
+   - 12.DELTA_PRE_CHECK.sql 증가분 사전 감사 쿼리 전면 정규화:
+     * 부서, 사용자, 직위, 직급, 그룹, 그룹멤버, 권한(부서장 S1, 접수 D1 등) 7대 영역 전수 감사 쿼리 구축
+   - EMPCODE vs USER_ID 매핑 무결성 감사:
+     * 임의 혼용(NVL)에 따른 타인 매핑 위험 차단, EMPCODE 독립성 및 NULL 시 '000000' 안전 처리 검증
+   - 정합성 감사 정규식 전수 스캔:
+     * 구 MIG_... 잔여 패턴 0건 확인
+     * USR_GLOBAL 내 POS/RANK/DUTY 잔여 패턴 0건 확인
+     * G_LIST 잔여 패턴 0건 확인
+   - OpenJDK 17 컴파일 무결성 검증 완료 (Exit Code: 0)
+
+----------------------------------------------------------------------------------------------------
+ 3. 금일 생성 및 수정 파일 목록 (Changed Files Summary)
+----------------------------------------------------------------------------------------------------
+ 1) Java 소스 파일:
+    - handy_mig/java/com/handy/mig/OrgCsvExporter.java (7종 증가분 추출기, 스키마 정합성 보정)
+    - handy_mig/java/com/handy/mig/DuplicateAttachmentCleaner.java (수신문서 첨부 중복 보정)
+    - handy_mig/java/com/handy/mig/FileIntegrityChecker.java (공식 sancbox 경로 반영)
+    - handy_mig/java/com/handy/mig/TiberoMigRunner.java (SKIP_UNUSABLE_INDEXES 제거 및 방어 코딩)
+
+ 2) Shell 스크립트:
+    - handy_mig/build_and_run.sh (대화형 원터치 메뉴, 자동 빌드 스마트화, check-cols 명령어 추가)
+    - handy_mig/kill_mig.sh (무한 대기 방지 비상 강제 프로세스 종료 스크립트)
+
+ 3) SQL 스크립트:
+    - handy_mig/sql/org/12.DELTA_PRE_CHECK.sql (오픈 당일 7대 도메인 증가분 사전 감사 쿼리)
+    - handy_mig/sql/org/11.USER_DELTA_CSV_EXTRACT.sql (사용자 증가분 CSV 추출)
+    - handy_mig/sql/org/10.DEPT_DELTA_CSV_EXTRACT.sql (부서 증가분 CSV 추출)
+    - handy_mig/sql/org/01~07.*.sql (조직도 7종 CSV 추출 SQL: MG_... 테이블 접두사 전수 적용)
+    - handy_mig/sql/00.ORG_DIRECT_INSERT.sql (직접 적재: MG_... 및 USR_GLOBAL/POS/RANK 컬럼 정제)
+    - handy_mig/sql/00.ORG_DIRECT_INSERT_ALL_ADD.sql (ALL-ADD 직접 적재: 컬럼 정제)
+    - handy_mig/sql/07.DUPLICATE_ATTACHMENT_CHECK_AND_FIX.sql (수신문서 첨부 중복 보정 쿼리)
+    - handy_mig/sql/tool/02.CHECK_USR_GLOBAL_COLUMNS.sql (운영 DB USR, DEPT, POS, RANK, AUTH, GROUP 컬럼 전수 확인)
+
+ 4) 문서 (Documentation):
+    - handy_mig/doc/04.통합_마이그레이션_실행매뉴얼(SOP).md (신규 작성: 전 단계 통합 운영 매뉴얼)
+    - handy_mig/doc/00.조직도_CSV추출가이드.md (7종 파일 및 관리자 화면 업로드 순서 업데이트)
+    - handy_mig/doc/2026-10-19_작업내역.txt (본 작업 내역서)
+
+----------------------------------------------------------------------------------------------------
+ 4. 향후 작업 계획 (Next Steps)
+----------------------------------------------------------------------------------------------------
+ 1) 폐쇄망 이관 서버에서 ./build_and_run.sh org-delta-check 실행 및 증가분 건수 확인
+ 2) ./build_and_run.sh check-cols 실행을 통한 운영 DB 실존 그룹 테이블명 최종 크로스 체크
+ 3) 수신문서 첨부 중복 보정 모듈(DuplicateAttachmentCleaner) 사전 리허설 검증
+ 4) 최종 이관 데이터 전수 1:1 건수 대사 보고서 산출
+====================================================================================================

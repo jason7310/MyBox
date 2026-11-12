@@ -1,0 +1,197 @@
+-- ====================================================================================================
+-- 스크립트명 : 01.MG_BOARD_EXTRACT.sql
+-- 작성목적   : ACUBE 6.0 + LUXOR 포털 환경에서 중복 제거된 유일 게시판 마스터(MG_BOARD) 추출 및 적재
+-- 대상스키마 : 원천(LUXOR, BBS_USER) -> 스테이징(MIG1_USER.MG_BOARD)
+-- 정합성보장 :
+--   1. LUXOR.TLXR_CONTENT + TLXR_MESSAGE(PORTAL.CONTENT, LANG_TYPE='ko') 한글 게시판명 1:1 매핑
+--   2. BOARD_ID 기준 중복 제거 (활성 'Y' 및 최근 수정일자 최우선 선별, ROW_NUMBER = 1)
+--   3. BBS_USER.TBBS_BOARD_MASTER 속성(유형, 덧글/답글/익명 여부 등) 결합 및 HANDY_BOARD_ID(CHAR(9)) 자동 채번
+-- ====================================================================================================
+
+ALTER SESSION ENABLE PARALLEL DDL;
+ALTER SESSION ENABLE PARALLEL DML;
+
+-- 1. 스테이징 테이블 생성 (MIG1_USER.MG_BOARD)
+BEGIN
+    EXECUTE IMMEDIATE 'DROP TABLE MIG1_USER.MG_BOARD CASCADE CONSTRAINTS';
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+CREATE TABLE MIG1_USER.MG_BOARD (
+    BOARD_ID          VARCHAR2(200) NOT NULL, -- 원천 게시판 고유 ID (PK)
+    BOARD_NAME        VARCHAR2(400) NOT NULL, -- 한글 게시판 명칭
+    BOARD_DESC        VARCHAR2(1500),         -- 게시판 설명
+    BOARD_TYPE        VARCHAR2(10),           -- 원천 게시판 타입(L:목록, B:블로그, I:이미지, G:갤러리, S:SNS)
+    CONTENT_ID        VARCHAR2(50),           -- 포털 컨텐츠 ID
+    PORTLET_ID        VARCHAR2(200),          -- 포틀릿 ID
+    MENU_ID           VARCHAR2(50),           -- 메뉴 ID
+    FOLDER_ID         VARCHAR2(50),           -- 폴더 ID
+    PAR_BOARD_ID      VARCHAR2(200),          -- 상위 게시판/폴더 ID
+    SORT_ORDER        NUMBER(5,0) DEFAULT 1,  -- 정렬 순서
+    USE_REPLY         CHAR(1) DEFAULT '0',    -- 답글 사용 여부
+    USE_COMMENT       CHAR(1) DEFAULT '0',    -- 덧글(한줄답변) 사용 여부
+    USE_ANONYMOUS     CHAR(1) DEFAULT 'R',    -- 실명/익명 여부(R:실명, N/H/P:익명/필명)
+    ATTACH_SIZE       NUMBER(10,0),           -- 첨부 제한 크기(Byte)
+    IS_ACTIVE         CHAR(1) DEFAULT 'Y',    -- 포털 사용 여부 ('Y'/'N')
+    REG_DATE          DATE,                   -- 최초 생성일시
+    MOD_DATE          DATE,                   -- 최종 수정일시
+    POST_CNT          NUMBER(10,0) DEFAULT 0, -- 원천 게시물 건수 (집계용)
+    MIG_YN            CHAR(1) DEFAULT 'N',    -- 핸디 이관 여부 ('Y'/'N')
+    HANDY_BOARD_ID    CHAR(9) NOT NULL,       -- 핸디 INTRAWARE.BBOARD.BRD_ID (CHAR(9) 채번)
+    HANDY_PAR_ID      CHAR(9) DEFAULT '^^^^^^^^^', -- 핸디 상위 게시판 ID (CHAR(9))
+    CONSTRAINT PK_MG_BOARD PRIMARY KEY (BOARD_ID)
+)
+NOLOGGING;
+
+CREATE UNIQUE INDEX MIG1_USER.UX_MG_BOARD_HANDY_ID ON MIG1_USER.MG_BOARD (HANDY_BOARD_ID) NOLOGGING;
+
+COMMENT ON TABLE  MIG1_USER.MG_BOARD                IS '게시판 마스터 이관 스테이징 테이블';
+COMMENT ON COLUMN MIG1_USER.MG_BOARD.BOARD_ID       IS '원천 ACUBE/LUXOR 게시판 고유 ID';
+COMMENT ON COLUMN MIG1_USER.MG_BOARD.BOARD_NAME     IS '실제 한글 게시판 명칭 (TLXR_MESSAGE 매핑)';
+COMMENT ON COLUMN MIG1_USER.MG_BOARD.HANDY_BOARD_ID IS '핸디 10.x INTRAWARE.BBOARD 매핑용 9자리 ID (B00000001~)';
+
+
+-- 2. 중복 제거(Deduplication) 및 TBBS_BOARD_MASTER 조인 적재
+INSERT /*+ APPEND */ INTO MIG1_USER.MG_BOARD (
+    BOARD_ID,
+    BOARD_NAME,
+    BOARD_DESC,
+    BOARD_TYPE,
+    CONTENT_ID,
+    PORTLET_ID,
+    MENU_ID,
+    FOLDER_ID,
+    PAR_BOARD_ID,
+    SORT_ORDER,
+    USE_REPLY,
+    USE_COMMENT,
+    USE_ANONYMOUS,
+    ATTACH_SIZE,
+    IS_ACTIVE,
+    REG_DATE,
+    MOD_DATE,
+    POST_CNT,
+    MIG_YN,
+    HANDY_BOARD_ID,
+    HANDY_PAR_ID
+)
+WITH LUXOR_BOARDS AS (
+    SELECT 
+        C.BOARD_ID,
+        TRIM(M.MESSAGE_NAME) AS BOARD_NAME,
+        C.CONTENT_ID,
+        C.PORTLET_ID,
+        NVL(C.IS_ACTIVE, 'Y') AS IS_ACTIVE,
+        C.REG_DATE,
+        C.MOD_DATE,
+        ROW_NUMBER() OVER (
+            PARTITION BY C.BOARD_ID 
+            ORDER BY 
+                CASE WHEN NVL(C.IS_ACTIVE, 'Y') = 'Y' THEN 1 ELSE 2 END,
+                C.MOD_DATE DESC NULLS LAST,
+                C.REG_DATE DESC NULLS LAST,
+                C.CONTENT_ID ASC
+        ) AS RN
+    FROM LUXOR.TLXR_CONTENT C
+    JOIN LUXOR.TLXR_MESSAGE M
+      ON C.CONTENT_NAME_ID = M.MESSAGE_ID
+    WHERE M.LANG_TYPE = 'ko'
+      AND M.MESSAGE_TYPE = 'PORTAL.CONTENT'
+      AND C.BOARD_ID IS NOT NULL
+),
+MENU_INFO AS (
+    SELECT
+        BM.BOARD_ID,
+        BM.MENU_ID,
+        BM.FOLDER_ID,
+        BM.PARENT_MENU_ID,
+        BM.MENU_NAME,
+        BM.SORT_ORDER,
+        ROW_NUMBER() OVER (
+            PARTITION BY BM.BOARD_ID
+            ORDER BY BM.SORT_ORDER ASC NULLS LAST, BM.CREATE_DATE DESC NULLS LAST
+        ) AS RN
+    FROM BBS_USER.TBBS_BOARD_MENU BM
+    WHERE BM.BOARD_ID IS NOT NULL
+),
+POST_STAT AS (
+    SELECT
+        BOARD_ID,
+        COUNT(*) AS POST_CNT
+    FROM BBS_USER.TBBS_POST_COMMON
+    WHERE NVL(POST_TYPE, 'N') <> 'D'
+    GROUP BY BOARD_ID
+),
+MERGED_BOARDS AS (
+    SELECT
+        COALESCE(L.BOARD_ID, BM.BOARD_ID) AS BOARD_ID,
+        SUBSTRB(
+            NVL(
+                L.BOARD_NAME,
+                NVL(TRIM(BM.BOARD_NAME), NVL(TRIM(MN.MENU_NAME), '미분류게시판_' || BM.BOARD_ID))
+            ), 1, 120
+        ) AS BOARD_NAME,
+        BM.BOARD_DESCRIPTION AS BOARD_DESC,
+        NVL(BM.BOARD_TYPE, 'L') AS BOARD_TYPE,
+        L.CONTENT_ID,
+        L.PORTLET_ID,
+        NVL(BM.MENU_ID, MN.MENU_ID) AS MENU_ID,
+        MN.FOLDER_ID,
+        MN.PARENT_MENU_ID AS PAR_BOARD_ID,
+        NVL(MN.SORT_ORDER, 1) AS SORT_ORDER,
+        NVL(BM.USE_POST_REPLY, '0') AS USE_REPLY,
+        NVL(BM.USE_COMMENT, '1') AS USE_COMMENT,
+        NVL(BM.USE_ANONYMOUS, 'R') AS USE_ANONYMOUS,
+        NVL(BM.ATTACH_SIZE, 10485760) AS ATTACH_SIZE,
+        NVL(L.IS_ACTIVE, 'Y') AS IS_ACTIVE,
+        COALESCE(L.REG_DATE, CAST(BM.CREATE_DATE AS DATE), SYSDATE) AS REG_DATE,
+        COALESCE(L.MOD_DATE, CAST(BM.UPDATE_DATE AS DATE), SYSDATE) AS MOD_DATE,
+        NVL(PS.POST_CNT, 0) AS POST_CNT
+    FROM (SELECT * FROM LUXOR_BOARDS WHERE RN = 1) L
+    FULL OUTER JOIN BBS_USER.TBBS_BOARD_MASTER BM
+      ON L.BOARD_ID = BM.BOARD_ID
+    LEFT JOIN (SELECT * FROM MENU_INFO WHERE RN = 1) MN
+      ON COALESCE(L.BOARD_ID, BM.BOARD_ID) = MN.BOARD_ID
+    LEFT JOIN POST_STAT PS
+      ON COALESCE(L.BOARD_ID, BM.BOARD_ID) = PS.BOARD_ID
+    WHERE L.BOARD_ID IS NOT NULL
+       OR NVL(PS.POST_CNT, 0) > 0
+)
+SELECT
+    BOARD_ID,
+    BOARD_NAME,
+    BOARD_DESC,
+    BOARD_TYPE,
+    CONTENT_ID,
+    PORTLET_ID,
+    MENU_ID,
+    FOLDER_ID,
+    PAR_BOARD_ID,
+    SORT_ORDER,
+    USE_REPLY,
+    USE_COMMENT,
+    USE_ANONYMOUS,
+    ATTACH_SIZE,
+    IS_ACTIVE,
+    REG_DATE,
+    MOD_DATE,
+    POST_CNT,
+    'N' AS MIG_YN,
+    'B' || LPAD(ROW_NUMBER() OVER (ORDER BY CASE WHEN IS_ACTIVE = 'Y' THEN 1 ELSE 2 END, SORT_ORDER, BOARD_ID), 8, '0') AS HANDY_BOARD_ID,
+    '^^^^^^^^^' AS HANDY_PAR_ID
+FROM MERGED_BOARDS;
+
+COMMIT;
+
+-- 3. 적재 결과 확인 및 검증
+SELECT 
+    COUNT(*) AS TOTAL_UNIQUE_BOARDS,
+    SUM(CASE WHEN POST_CNT > 0 THEN 1 ELSE 0 END) AS BOARDS_WITH_POSTS,
+    SUM(POST_CNT) AS TOTAL_ACTIVE_POSTS
+FROM MIG1_USER.MG_BOARD;
+
+SELECT BOARD_ID, HANDY_BOARD_ID, BOARD_NAME, BOARD_TYPE, IS_ACTIVE, POST_CNT
+FROM MIG1_USER.MG_BOARD
+ORDER BY POST_CNT DESC, BOARD_NAME;

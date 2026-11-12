@@ -1,0 +1,72 @@
+-- ====================================================================================================
+-- [DBA 유틸리티] INTRAWARE.USR_GLOBAL 및 조직도 테이블 실제 컬럼 전수 확인 쿼리
+-- 대상 DBMS : Tibero 7 (TAC 2-node)
+-- 목적 : INTRAWARE.USR_GLOBAL, DEPT_GLOBAL, POS, RANK 등 실제 테이블 컬럼 목록 및 코멘트 전수 조회
+-- ====================================================================================================
+
+-- 1. INTRAWARE.USR_GLOBAL 실제 컬럼 목록 조회
+SELECT 
+    COLUMN_ID,
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE
+FROM ALL_TAB_COLS
+WHERE OWNER = 'INTRAWARE'
+  AND TABLE_NAME = 'USR_GLOBAL'
+ORDER BY COLUMN_ID;
+
+-- 2. INTRAWARE.DEPT_GLOBAL 실제 컬럼 목록 조회
+SELECT 
+    COLUMN_ID,
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE
+FROM ALL_TAB_COLS
+WHERE OWNER = 'INTRAWARE'
+  AND TABLE_NAME = 'DEPT_GLOBAL'
+ORDER BY COLUMN_ID;
+
+-- 3. INTRAWARE.POS 실제 컬럼 목록 조회
+SELECT 
+    COLUMN_ID,
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE
+FROM ALL_TAB_COLS
+WHERE OWNER = 'INTRAWARE'
+  AND TABLE_NAME = 'POS'
+ORDER BY COLUMN_ID;
+
+-- 4. INTRAWARE.RANK 실제 컬럼 목록 조회
+SELECT 
+    COLUMN_ID,
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE
+FROM ALL_TAB_COLS
+WHERE OWNER = 'INTRAWARE'
+  AND TABLE_NAME = 'RANK'
+ORDER BY COLUMN_ID;
+
+-- 5. INTRAWARE.USR_AUTH 실제 컬럼 목록 조회
+SELECT 
+    COLUMN_ID,
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE
+FROM ALL_TAB_COLS
+WHERE OWNER = 'INTRAWARE'
+  AND TABLE_NAME = 'USR_AUTH'
+ORDER BY COLUMN_ID;
+
+-- 6. INTRAWARE 스키마 내 그룹(GROUP) 관련 실제 테이블 목록 전수 조회
+SELECT TABLE_NAME 
+FROM ALL_TABLES 
+WHERE OWNER = 'INTRAWARE' 
+  AND (TABLE_NAME LIKE '%GROUP%' OR TABLE_NAME LIKE '%GRP%' OR TABLE_NAME LIKE 'G_%')
+ORDER BY TABLE_NAME;
